@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salesforce Win Rate Analyzer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <!-- jStat for statistical operations -->
+    <script src="https://cdn.jsdelivr.net/npm/jstat@1.9.5/dist/jstat.min.js"></script>
+    <!-- Math.js for mathematical operations -->
+    <script src="https://cdn.jsdelivr.net/npm/mathjs@10.6.4/lib/browser/math.min.js"></script>
+    <!-- Simple-statistics for statistical operations -->
+    <script src="https://unpkg.com/simple-statistics@7.8.0/dist/simple-statistics.min.js"></script>
+</head>
+<body>
+    <header class="bg-primary text-white">
+        <div class="container py-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1>Salesforce Win Rate Analyzer</h1>
+                <div id="userInfo" class="text-white">
+                    <span id="userName"></span>
+                    <button id="logoutBtn" class="btn btn-outline-light ms-3">Logout</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container mt-4">
+        <!-- Login section - shown if not authenticated -->
+        <div id="loginSection" class="card shadow mb-4 d-none">
+            <div class="card-header bg-primary text-white">
+                <h3>Connect to Salesforce</h3>
+            </div>
+            <div class="card-body">
+                <p>Please authenticate with your Salesforce account to analyze your opportunity data.</p>
+                <button id="loginBtn" class="btn btn-primary">Connect to Salesforce</button>
+            </div>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loadingIndicator" class="text-center my-5 d-none">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2" id="loadingMessage">Loading data...</p>
+        </div>
+
+        <!-- Main navigation tabs -->
+        <div id="mainContent" class="d-none">
+            <ul class="nav nav-tabs" id="analyticsTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard" type="button" role="tab" aria-controls="dashboard" aria-selected="true">Dashboard</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="dimension-impact-tab" data-bs-toggle="tab" data-bs-target="#dimensionImpact" type="button" role="tab" aria-controls="dimensionImpact" aria-selected="false">Dimension Impact</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="clustering-tab" data-bs-toggle="tab" data-bs-target="#clustering" type="button" role="tab" aria-controls="clustering" aria-selected="false">Dimension Clustering</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="prediction-tab" data-bs-toggle="tab" data-bs-target="#prediction" type="button" role="tab" aria-controls="prediction" aria-selected="false">Win Rate Prediction</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="lookup-tab" data-bs-toggle="tab" data-bs-target="#lookup" type="button" role="tab" aria-controls="lookup" aria-selected="false">Win Rate Lookup</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button" role="tab" aria-controls="settings" aria-selected="false">Settings</button>
+                </li>
+            </ul>
+
+            <!-- Tab content -->
+            <div class="tab-content mt-4" id="analyticsTabContent">
+                <!-- Dashboard Tab -->
+                <div class="tab-pane fade show active" id="dashboard" role="tabpanel" aria-labelledby="dashboard-tab">
+                    <div class="row" id="dashboardContent">
+                        <div class="col-md-6">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Overall Win Rate</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-center">
+                                        <div id="overallWinRateChart" style="width: 100%; height: 200px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Win Rate by Month</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="winRateByMonthChart" style="width: 100%; height: 200px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-12">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Top Factors Impacting Win Rate</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="topFactorsChart" style="width: 100%; height: 300px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dimension Impact Tab -->
+                <div class="tab-pane fade" id="dimensionImpact" role="tabpanel" aria-labelledby="dimension-impact-tab">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Analysis Controls</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="dimensionImpactForm">
+                                        <div class="mb-3">
+                                            <label for="dimensionSelect" class="form-label">Select Dimensions</label>
+                                            <select id="dimensionSelect" class="form-select" multiple size="10">
+                                                <!-- Will be populated dynamically -->
+                                            </select>
+                                            <div class="form-text">Hold Ctrl/Cmd to select multiple dimensions</div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="timeRangeSelect" class="form-label">Time Range</label>
+                                            <select id="timeRangeSelect" class="form-select">
+                                                <option value="last30Days">Last 30 Days</option>
+                                                <option value="last90Days">Last 90 Days</option>
+                                                <option value="lastYear">Last Year</option>
+                                                <option value="allTime" selected>All Time</option>
+                                                <option value="custom">Custom Range...</option>
+                                            </select>
+                                        </div>
+                                        <div id="customDateRange" class="row mb-3 d-none">
+                                            <div class="col-md-6">
+                                                <label for="startDate" class="form-label">Start Date</label>
+                                                <input type="date" id="startDate" class="form-control">
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label for="endDate" class="form-label">End Date</label>
+                                                <input type="date" id="endDate" class="form-control">
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary w-100">Run Analysis</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Dimension Impact Results</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="dimensionImpactResults">
+                                        <p class="text-center text-muted">Select dimensions and run analysis to see results</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Regression Coefficients</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="regressionCoefficients">
+                                        <p class="text-center text-muted">Run analysis to see regression coefficients</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dimension Clustering Tab -->
+                <div class="tab-pane fade" id="clustering" role="tabpanel" aria-labelledby="clustering-tab">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Clustering Options</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="clusteringForm">
+                                        <div class="mb-3">
+                                            <label for="clusterDimensionSelect" class="form-label">Select Dimensions</label>
+                                            <select id="clusterDimensionSelect" class="form-select" multiple size="8">
+                                                <!-- Will be populated dynamically -->
+                                            </select>
+                                            <div class="form-text">Hold Ctrl/Cmd to select multiple dimensions</div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="clusterCount" class="form-label">Number of Clusters</label>
+                                            <input type="number" id="clusterCount" class="form-control" min="2" max="10" value="3">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="clusteringAlgorithm" class="form-label">Clustering Algorithm</label>
+                                            <select id="clusteringAlgorithm" class="form-select">
+                                                <option value="kmeans" selected>K-Means</option>
+                                                <option value="hierarchical">Hierarchical</option>
+                                            </select>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary w-100">Run Clustering</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Cluster Visualization</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="clusterVisualization" style="width: 100%; height: 400px;">
+                                        <p class="text-center text-muted">Run clustering to see results</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Cluster Analysis</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="clusterAnalysis">
+                                        <p class="text-center text-muted">Run clustering to see analysis</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Win Rate Prediction Tab -->
+                <div class="tab-pane fade" id="prediction" role="tabpanel" aria-labelledby="prediction-tab">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Opportunity Parameters</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="predictionForm">
+                                        <div id="predictionFields">
+                                            <!-- Will be populated dynamically -->
+                                            <p class="text-center text-muted">Loading prediction model...</p>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary w-100 mt-3">Calculate Win Probability</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Prediction Results</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="predictionResults" class="text-center">
+                                        <p class="text-muted">Enter opportunity parameters to see win probability</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Factor Importance</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="factorImportance">
+                                        <p class="text-center text-muted">Calculate win probability to see factor importance</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Win Rate Formula</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="winRateFormula">
+                                        <p class="text-center text-muted">Calculate win probability to see formula</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Win Rate Lookup Tab -->
+                <div class="tab-pane fade" id="lookup" role="tabpanel" aria-labelledby="lookup-tab">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Lookup Table Configuration</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="lookupForm">
+                                        <div class="mb-3">
+                                            <label for="primaryDimension" class="form-label">Primary Dimension (Rows)</label>
+                                            <select id="primaryDimension" class="form-select">
+                                                <!-- Will be populated dynamically -->
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="secondaryDimension" class="form-label">Secondary Dimension (Columns)</label>
+                                            <select id="secondaryDimension" class="form-select">
+                                                <!-- Will be populated dynamically -->
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="tertiaryDimension" class="form-label">Optional Third Dimension (Filter)</label>
+                                            <select id="tertiaryDimension" class="form-select">
+                                                <option value="">None</option>
+                                                <!-- Will be populated dynamically -->
+                                            </select>
+                                        </div>
+                                        <div id="tertiaryValueContainer" class="mb-3 d-none">
+                                            <label for="tertiaryValue" class="form-label">Filter Value</label>
+                                            <select id="tertiaryValue" class="form-select">
+                                                <!-- Will be populated dynamically -->
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="showSampleSize" checked>
+                                                <label class="form-check-label" for="showSampleSize">
+                                                    Show Sample Size
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="highlightSignificant" checked>
+                                                <label class="form-check-label" for="highlightSignificant">
+                                                    Highlight Statistically Significant
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary w-100">Generate Lookup Table</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">Win Rate Lookup Table</h5>
+                                    <div>
+                                        <button id="exportCsv" class="btn btn-sm btn-outline-light me-2">Export CSV</button>
+                                        <button id="exportExcel" class="btn btn-sm btn-outline-light">Export Excel</button>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <div id="lookupTableContainer" class="table-responsive">
+                                        <p class="text-center text-muted">Configure dimensions to generate lookup table</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Visualized Heatmap</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="lookupHeatmap" style="width: 100%; height: 400px;">
+                                        <p class="text-center text-muted">Generate lookup table to see heatmap</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div class="tab-pane fade" id="settings" role="tabpanel" aria-labelledby="settings-tab">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Data Configuration</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="dataConfigForm">
+                                        <div class="mb-3">
+                                            <label for="opportunityQuery" class="form-label">Opportunity Filter (SOQL WHERE)</label>
+                                            <input type="text" id="opportunityQuery" class="form-control" placeholder="CloseDate > 2023-01-01">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="winDefinition" class="form-label">Win Definition</label>
+                                            <select id="winDefinition" class="form-select">
+                                                <option value="standard" selected>Standard (IsWon = true)</option>
+                                                <option value="custom">Custom Definition</option>
+                                            </select>
+                                        </div>
+                                        <div id="customWinDefinition" class="mb-3 d-none">
+                                            <label for="customWinQuery" class="form-label">Custom Win Definition (SOQL)</label>
+                                            <input type="text" id="customWinQuery" class="form-control" placeholder="StageName = 'Closed Won'">
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="excludeOutliers" checked>
+                                                <label class="form-check-label" for="excludeOutliers">
+                                                    Exclude Outliers in Analysis
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Configuration</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Analytics Settings</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="analyticsConfigForm">
+                                        <div class="mb-3">
+                                            <label for="confidenceLevel" class="form-label">Statistical Confidence Level</label>
+                                            <select id="confidenceLevel" class="form-select">
+                                                <option value="0.9">90%</option>
+                                                <option value="0.95" selected>95%</option>
+                                                <option value="0.99">99%</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="minSampleSize" class="form-label">Minimum Sample Size</label>
+                                            <input type="number" id="minSampleSize" class="form-control" min="5" value="10">
+                                            <div class="form-text">Minimum number of opportunities needed for analysis</div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="predictionModelType" class="form-label">Prediction Model Type</label>
+                                            <select id="predictionModelType" class="form-select">
+                                                <option value="logistic" selected>Logistic Regression</option>
+                                                <option value="randomForest">Random Forest (Approximation)</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="useWeightedModel" checked>
+                                                <label class="form-check-label" for="useWeightedModel">
+                                                    Use Time-Weighted Model (Recent Data Matters More)
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                                    </form>
+                                </div>
+                            </div>
+                            <div class="card shadow mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>Visualization Settings</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="visualizationConfigForm">
+                                        <div class="mb-3">
+                                            <label for="colorScheme" class="form-label">Color Scheme</label>
+                                            <select id="colorScheme" class="form-select">
+                                                <option value="blues" selected>Blues</option>
+                                                <option value="greens">Greens</option>
+                                                <option value="oranges">Oranges</option>
+                                                <option value="purples">Purples</option>
+                                                <option value="spectral">Spectral</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="showConfidenceIntervals" checked>
+                                                <label class="form-check-label" for="showConfidenceIntervals">
+                                                    Show Confidence Intervals in Charts
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-light mt-5 py-3">
+        <div class="container text-center">
+            <p class="text-muted mb-0">Salesforce Win Rate Analyzer &copy; 2025</p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Application Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/dimensionImpact.js"></script>
+    <script src="js/clustering.js"></script>
+    <script src="js/prediction.js"></script>
+    <script src="js/lookup.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
