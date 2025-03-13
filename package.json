@@ -1,0 +1,35 @@
+{
+  "name": "salesforce-win-rate-analyzer",
+  "version": "1.0.0",
+  "description": "Advanced analytics tool for Salesforce opportunity win rate analysis",
+  "main": "backend/app.js",
+  "scripts": {
+    "start": "node backend/app.js",
+    "dev": "nodemon backend/app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "salesforce",
+    "analytics",
+    "win-rate",
+    "prediction",
+    "regression"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.19.0",
+    "cookie-parser": "^1.4.5",
+    "cors": "^2.8.5",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "jStat": "^1.8.6",
+    "jsforce": "^1.11.0",
+    "jsonwebtoken": "^8.5.1",
+    "mathjs": "^10.0.0",
+    "simple-statistics": "^7.7.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  }
+}
