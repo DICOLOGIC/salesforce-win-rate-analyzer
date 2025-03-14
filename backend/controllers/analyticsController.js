@@ -165,7 +165,7 @@ const performDimensionClustering = async (req, res) => {
     });
     
     // Perform clustering analysis
-    const clusteringResults = performDimensionClustering(
+    const clusteringResults = clusterDimensions((
       opportunities,
       dimensions,
       k || 3
