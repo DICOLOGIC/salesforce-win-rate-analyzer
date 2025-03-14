@@ -3,7 +3,7 @@
  * Handles request/response for analytics operations
  */
 
-const { performMultivariateRegression, performDimensionClustering, generateWinRateLookupTable } = require('../services/analyticService');
+const { performMultivariateRegression, performDimensionClustering: clusterDimensions, generateWinRateLookupTable } = require('../services/analyticService');
 const { buildPredictionModel, predictWinRate, batchPredictWinRates, generateWinRateFormula } = require('../services/predictionService');
 const { createConnection, fetchOpportunities } = require('../services/salesforceService');
 
