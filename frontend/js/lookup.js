@@ -1,616 +1,680 @@
 /**
- * Lookup Table module for Win Rate Analyzer
- * Handles win rate lookup table visualization and interaction
+ * Win Rate Lookup Table Module
+ * 
+ * This module implements the Win Rate Lookup Table feature described in section 3.2.3 of the PRD.
+ * It generates a multi-dimensional reference table showing win rates for various dimension combinations.
  */
 
-const Lookup = (function() {
-    // Private variables
-    let lookupData = {};
-    let selectedPrimaryDimension = '';
-    let selectedSecondaryDimension = '';
-    let selectedFilters = {};
-    let filterValues = {};
-    let heatmapChart = null;
+const LookupTable = (function() {
+    // Private members
+    let tableData = [];
+    let selectedDimensions = [];
+    let containerElement = null;
+    let isLoading = false;
     
     /**
-     * Initialize the module
+     * Initializes the lookup table module
+     * @param {HTMLElement} container - The container element for the lookup table
      */
-    function initialize() {
+    function init(container) {
+        containerElement = container;
+        
+        // Initialize dimension selector
+        _initDimensionSelector();
+        
+        // Initialize table export buttons
+        _initExportButtons();
+        
         // Set up event listeners
-        setupEventListeners();
+        _setupEventListeners();
         
-        // Load initial data
-        loadLookupTableData();
+        // Load default dimensions
+        _loadDefaultDimensions();
     }
     
     /**
-     * Set up event listeners
+     * Initializes the dimension selector UI
+     * @private
      */
-    function setupEventListeners() {
-        // Primary dimension selector
-        document.getElementById('primary-dimension-selector').addEventListener('change', function(e) {
-            selectedPrimaryDimension = e.target.value;
-            updateLookupTable();
-        });
-        
-        // Secondary dimension selector
-        document.getElementById('secondary-dimension-selector').addEventListener('change', function(e) {
-            selectedSecondaryDimension = e.target.value;
-            updateLookupTable();
-        });
-        
-        // Refresh button
-        document.getElementById('refresh-lookup-table').addEventListener('click', function() {
-            loadLookupTableData();
-        });
-        
-        // Export button
-        document.getElementById('export-lookup-table').addEventListener('click', function() {
-            exportLookupTable();
-        });
-        
-        // Toggle heatmap button
-        document.getElementById('toggle-heatmap').addEventListener('click', function() {
-            toggleHeatmap();
-        });
-        
-        // Listen for auth state changes
-        Utils.eventBus.subscribe('auth:stateChanged', function(isAuthenticated) {
-            if (isAuthenticated) {
-                loadLookupTableData();
-            } else {
-                clearLookupTable();
-            }
-        });
-        
-        // Window resize event
-        window.addEventListener('resize', Utils.debounce(function() {
-            if (heatmapChart) {
-                heatmapChart.resize();
-            }
-        }, 250));
-    }
-    
-    /**
-     * Load lookup table data from API
-     */
-    function loadLookupTableData() {
-        showLoading(true);
-        
-        API.getLookupTableData()
-            .then(function(data) {
-                lookupData = data;
-                
-                // Initialize dimension selectors
-                initializeDimensionSelectors();
-                
-                // Initialize filters
-                initializeFilters();
-                
-                // Render lookup table
-                renderLookupTable();
-                
-                showLoading(false);
-            })
-            .catch(function(error) {
-                console.error('Error loading lookup table data:', error);
-                showError('Failed to load lookup table data. Please try again.');
-                showLoading(false);
-            });
-    }
-    
-    /**
-     * Initialize dimension selectors
-     */
-    function initializeDimensionSelectors() {
-        const primarySelector = document.getElementById('primary-dimension-selector');
-        const secondarySelector = document.getElementById('secondary-dimension-selector');
-        
-        // Clear existing options
-        primarySelector.innerHTML = '<option value="">Select Dimension</option>';
-        secondarySelector.innerHTML = '<option value="">Select Dimension</option>';
-        
-        // Add options for each dimension
-        lookupData.dimensions.forEach(dimension => {
-            const primaryOption = document.createElement('option');
-            primaryOption.value = dimension.id;
-            primaryOption.textContent = formatDimensionName(dimension.name);
-            primarySelector.appendChild(primaryOption);
-            
-            const secondaryOption = document.createElement('option');
-            secondaryOption.value = dimension.id;
-            secondaryOption.textContent = formatDimensionName(dimension.name);
-            secondarySelector.appendChild(secondaryOption);
-        });
-        
-        // Set initial selections
-        if (lookupData.dimensions.length > 0) {
-            selectedPrimaryDimension = lookupData.dimensions[0].id;
-            primarySelector.value = selectedPrimaryDimension;
-        }
-        
-        if (lookupData.dimensions.length > 1) {
-            selectedSecondaryDimension = lookupData.dimensions[1].id;
-            secondarySelector.value = selectedSecondaryDimension;
-        }
-    }
-    
-    /**
-     * Initialize filter controls
-     */
-    function initializeFilters() {
-        const filtersContainer = document.getElementById('lookup-filters');
-        filtersContainer.innerHTML = '';
-        
-        // Create filter for each dimension (except primary and secondary)
-        lookupData.dimensions.forEach(dimension => {
-            // Skip if this is the primary or secondary dimension
-            if (dimension.id === selectedPrimaryDimension || dimension.id === selectedSecondaryDimension) {
-                return;
-            }
-            
-            // Get unique values for this dimension
-            const values = dimension.values || [];
-            
-            // Create filter control
-            const filterControl = document.createElement('div');
-            filterControl.className = 'filter-control';
-            filterControl.innerHTML = `
-                <label for="filter-${dimension.id}">${formatDimensionName(dimension.name)}</label>
-                <select id="filter-${dimension.id}" class="form-control dimension-filter" data-dimension="${dimension.id}">
-                    <option value="">All</option>
-                    ${values.map(value => `<option value="${value}">${value}</option>`).join('')}
-                </select>
-            `;
-            
-            filtersContainer.appendChild(filterControl);
-            
-            // Initialize filter value
-            filterValues[dimension.id] = values;
-            selectedFilters[dimension.id] = '';
-        });
-        
-        // Add event listeners to filters
-        const filterSelects = document.querySelectorAll('.dimension-filter');
-        filterSelects.forEach(select => {
-            select.addEventListener('change', function() {
-                const dimensionId = this.getAttribute('data-dimension');
-                selectedFilters[dimensionId] = this.value;
-                updateLookupTable();
-            });
-        });
-    }
-    
-    /**
-     * Update lookup table when selections change
-     */
-    function updateLookupTable() {
-        // Check if primary and secondary dimensions are selected
-        if (!selectedPrimaryDimension) {
-            showError('Please select a primary dimension.');
-            return;
-        }
-        
-        // Reinitialize filters (in case primary/secondary changed)
-        initializeFilters();
-        
-        // Render the lookup table
-        renderLookupTable();
-    }
-    
-    /**
-     * Render the lookup table
-     */
-    function renderLookupTable() {
-        const tableContainer = document.getElementById('lookup-table-container');
-        
-        // Get table data
-        const tableData = generateLookupTableData();
-        
-        if (!tableData || !tableData.rows || !tableData.columns) {
-            tableContainer.innerHTML = '<p>No data available for the selected dimensions.</p>';
-            return;
-        }
-        
-        // Generate HTML for table
-        let html = `
-            <div class="lookup-stats">
-                <div class="stat-item">
-                    <span class="stat-label">Data Points:</span>
-                    <span class="stat-value">${tableData.totalCount}</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Average Win Rate:</span>
-                    <span class="stat-value">${Utils.formatPercentage(tableData.averageWinRate)}</span>
+    function _initDimensionSelector() {
+        const dimensionSelector = document.createElement('div');
+        dimensionSelector.className = 'lookup-dimension-selector mb-4';
+        dimensionSelector.innerHTML = `
+            <h5>Select Dimensions for Lookup Table</h5>
+            <div class="alert alert-info">
+                <small>Select up to 3 dimensions to include in the lookup table. More dimensions will make the table larger.</small>
+            </div>
+            <div class="form-row dimension-checkboxes">
+                <div class="col-12 text-center">
+                    <p class="loading-dimensions">Loading available dimensions...</p>
                 </div>
             </div>
-            
-            <div class="table-scroll-container">
-                <table class="lookup-table">
+            <div class="form-row mt-3">
+                <div class="col-12">
+                    <button id="generate-lookup-table" class="btn btn-primary">Generate Lookup Table</button>
+                </div>
+            </div>
+        `;
+        
+        containerElement.appendChild(dimensionSelector);
+        
+        // Load available dimensions from the API
+        _loadAvailableDimensions();
+    }
+    
+    /**
+     * Initializes the export buttons for the lookup table
+     * @private
+     */
+    function _initExportButtons() {
+        const exportButtons = document.createElement('div');
+        exportButtons.className = 'lookup-export-buttons mb-4 d-none';
+        exportButtons.innerHTML = `
+            <div class="btn-group">
+                <button id="export-csv" class="btn btn-sm btn-outline-secondary">Export as CSV</button>
+                <button id="export-excel" class="btn btn-sm btn-outline-secondary">Export as Excel</button>
+            </div>
+        `;
+        
+        containerElement.appendChild(exportButtons);
+    }
+    
+    /**
+     * Sets up event listeners for the module
+     * @private
+     */
+    function _setupEventListeners() {
+        // Generate lookup table button
+        containerElement.addEventListener('click', function(e) {
+            if (e.target.id === 'generate-lookup-table') {
+                _generateLookupTable();
+            } else if (e.target.id === 'export-csv') {
+                _exportTableAsCSV();
+            } else if (e.target.id === 'export-excel') {
+                _exportTableAsExcel();
+            }
+        });
+        
+        // Dimension selection changes
+        containerElement.addEventListener('change', function(e) {
+            if (e.target.closest('.dimension-checkbox')) {
+                _updateSelectedDimensions();
+            }
+        });
+    }
+    
+    /**
+     * Loads the available dimensions from the API
+     * @private
+     */
+    function _loadAvailableDimensions() {
+        fetch('/api/dimensions')
+            .then(response => response.json())
+            .then(dimensions => {
+                _renderDimensionCheckboxes(dimensions);
+            })
+            .catch(error => {
+                console.error('Error loading dimensions:', error);
+                const checkboxesContainer = containerElement.querySelector('.dimension-checkboxes');
+                checkboxesContainer.innerHTML = `
+                    <div class="col-12">
+                        <div class="alert alert-danger">
+                            Failed to load dimensions. Please try refreshing the page.
+                        </div>
+                    </div>
+                `;
+            });
+    }
+    
+    /**
+     * Renders dimension checkboxes for selection
+     * @param {Array} dimensions - List of available dimensions
+     * @private
+     */
+    function _renderDimensionCheckboxes(dimensions) {
+        const checkboxesContainer = containerElement.querySelector('.dimension-checkboxes');
+        
+        if (!dimensions || dimensions.length === 0) {
+            checkboxesContainer.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-warning">
+                        No dimensions available for lookup table.
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Clear loading indicator
+        checkboxesContainer.innerHTML = '';
+        
+        // Create checkbox for each dimension
+        dimensions.forEach(dimension => {
+            const col = document.createElement('div');
+            col.className = 'col-md-4 col-sm-6 mb-2';
+            col.innerHTML = `
+                <div class="custom-control custom-checkbox dimension-checkbox">
+                    <input type="checkbox" class="custom-control-input" id="dim-${dimension.id}" data-dimension-id="${dimension.id}" data-dimension-name="${dimension.name}">
+                    <label class="custom-control-label" for="dim-${dimension.id}">${dimension.name}</label>
+                </div>
+            `;
+            checkboxesContainer.appendChild(col);
+        });
+    }
+    
+    /**
+     * Loads default dimensions for the lookup table
+     * @private
+     */
+    function _loadDefaultDimensions() {
+        // You could pre-select some default dimensions based on your application needs
+        // This would typically be loaded from user preferences or application settings
+    }
+    
+    /**
+     * Updates the list of selected dimensions based on checkbox state
+     * @private
+     */
+    function _updateSelectedDimensions() {
+        selectedDimensions = [];
+        
+        const checkboxes = containerElement.querySelectorAll('.dimension-checkbox input:checked');
+        checkboxes.forEach(checkbox => {
+            selectedDimensions.push({
+                id: checkbox.dataset.dimensionId,
+                name: checkbox.dataset.dimensionName
+            });
+        });
+        
+        // Disable additional checkboxes if maximum is reached
+        const allCheckboxes = containerElement.querySelectorAll('.dimension-checkbox input');
+        if (selectedDimensions.length >= 3) {
+            allCheckboxes.forEach(checkbox => {
+                if (!checkbox.checked) {
+                    checkbox.disabled = true;
+                }
+            });
+        } else {
+            allCheckboxes.forEach(checkbox => {
+                checkbox.disabled = false;
+            });
+        }
+        
+        // Enable/disable generate button based on selection
+        const generateButton = containerElement.querySelector('#generate-lookup-table');
+        generateButton.disabled = selectedDimensions.length === 0;
+    }
+    
+    /**
+     * Generates the lookup table based on selected dimensions
+     * @private
+     */
+    function _generateLookupTable() {
+        if (selectedDimensions.length === 0) {
+            alert('Please select at least one dimension for the lookup table.');
+            return;
+        }
+        
+        if (isLoading) return;
+        isLoading = true;
+        
+        // Show loading indicator
+        _showLoadingIndicator();
+        
+        // Prepare dimensions for API request
+        const dimensionIds = selectedDimensions.map(dim => dim.id);
+        
+        // Request lookup table data from API
+        fetch('/api/lookup-table', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                dimensions: dimensionIds
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            tableData = data;
+            _renderLookupTable(data);
+            // Show export buttons
+            containerElement.querySelector('.lookup-export-buttons').classList.remove('d-none');
+            isLoading = false;
+        })
+        .catch(error => {
+            console.error('Error generating lookup table:', error);
+            _showErrorMessage('Failed to generate lookup table. Please try again.');
+            isLoading = false;
+        });
+    }
+    
+    /**
+     * Renders the lookup table with the provided data
+     * @param {Object} data - Table data from the API
+     * @private
+     */
+    function _renderLookupTable(data) {
+        // Remove any existing table
+        const existingTable = containerElement.querySelector('.lookup-table-container');
+        if (existingTable) {
+            existingTable.remove();
+        }
+        
+        // Create table container
+        const tableContainer = document.createElement('div');
+        tableContainer.className = 'lookup-table-container mt-4';
+        
+        // For simplicity, we'll implement a 2D table rendering
+        // In a complete implementation, this would handle N dimensions with appropriate nesting
+        
+        if (selectedDimensions.length === 1) {
+            // Single dimension table (simplest case)
+            _renderOneDimensionalTable(tableContainer, data);
+        } else if (selectedDimensions.length === 2) {
+            // Two-dimensional table (rows and columns)
+            _renderTwoDimensionalTable(tableContainer, data);
+        } else {
+            // Multi-dimensional table (would be more complex in real implementation)
+            _renderMultiDimensionalTable(tableContainer, data);
+        }
+        
+        containerElement.appendChild(tableContainer);
+        
+        // Initialize heat map coloring for the table cells
+        _applyHeatMapColoring();
+    }
+    
+    /**
+     * Renders a one-dimensional lookup table
+     * @param {HTMLElement} container - Container for the table
+     * @param {Object} data - Table data
+     * @private
+     */
+    function _renderOneDimensionalTable(container, data) {
+        const dimensionName = selectedDimensions[0].name;
+        
+        const tableHtml = `
+            <h5>Win Rate by ${dimensionName}</h5>
+            <div class="table-responsive">
+                <table class="table table-bordered lookup-table">
                     <thead>
                         <tr>
-                            <th></th>
-                            ${tableData.columns.map(col => `<th>${col.label}</th>`).join('')}
-                            <th>Overall</th>
+                            <th>${dimensionName}</th>
+                            <th>Win Rate</th>
+                            <th>Sample Size</th>
+                            <th>Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.rows.map(row => `
+                            <tr>
+                                <td>${row.value}</td>
+                                <td class="win-rate-cell" data-value="${row.winRate}">${(row.winRate * 100).toFixed(1)}%</td>
+                                <td>${row.sampleSize}</td>
+                                <td>${_getConfidenceLabel(row.confidence)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        container.innerHTML = tableHtml;
+    }
+    
+    /**
+     * Renders a two-dimensional lookup table
+     * @param {HTMLElement} container - Container for the table
+     * @param {Object} data - Table data
+     * @private
+     */
+    function _renderTwoDimensionalTable(container, data) {
+        const rowDimension = selectedDimensions[0].name;
+        const colDimension = selectedDimensions[1].name;
+        
+        let tableHtml = `
+            <h5>Win Rate by ${rowDimension} and ${colDimension}</h5>
+            <div class="table-responsive">
+                <table class="table table-bordered lookup-table">
+                    <thead>
+                        <tr>
+                            <th>${rowDimension} \\ ${colDimension}</th>
+        `;
+        
+        // Add column headers
+        data.columnValues.forEach(colValue => {
+            tableHtml += `<th>${colValue}</th>`;
+        });
+        
+        tableHtml += `
                         </tr>
                     </thead>
                     <tbody>
         `;
         
-        // Add rows
-        tableData.rows.forEach(row => {
-            html += `
+        // Add rows with data cells
+        data.rows.forEach(row => {
+            tableHtml += `
                 <tr>
-                    <th>${row.label}</th>
-                    ${row.cells.map(cell => `
-                        <td class="${getCellClass(cell.winRate)}" 
-                            title="Win Rate: ${Utils.formatPercentage(cell.winRate)}, Count: ${cell.count}">
-                            ${Utils.formatPercentage(cell.winRate)}
-                            <span class="cell-count">(${cell.count})</span>
-                        </td>
-                    `).join('')}
-                    <td class="${getCellClass(row.totalWinRate)}">
-                        ${Utils.formatPercentage(row.totalWinRate)}
-                        <span class="cell-count">(${row.totalCount})</span>
+                    <th>${row.value}</th>
+            `;
+            
+            // Add cells for each column
+            row.cells.forEach(cell => {
+                const winRateDisplay = cell.winRate ? (cell.winRate * 100).toFixed(1) + '%' : 'N/A';
+                const confidence = cell.confidence || 0;
+                
+                tableHtml += `
+                    <td class="win-rate-cell" 
+                        data-value="${cell.winRate || 0}" 
+                        data-sample-size="${cell.sampleSize || 0}"
+                        data-confidence="${confidence}">
+                        <div>${winRateDisplay}</div>
+                        <small>${cell.sampleSize || 0} opp</small>
                     </td>
+                `;
+            });
+            
+            tableHtml += `
                 </tr>
             `;
         });
         
-        // Add overall row
-        html += `
-                <tr class="overall-row">
-                    <th>Overall</th>
-                    ${tableData.columnTotals.map(total => `
-                        <td class="${getCellClass(total.winRate)}">
-                            ${Utils.formatPercentage(total.winRate)}
-                            <span class="cell-count">(${total.count})</span>
-                        </td>
-                    `).join('')}
-                    <td class="${getCellClass(tableData.averageWinRate)}">
-                        ${Utils.formatPercentage(tableData.averageWinRate)}
-                        <span class="cell-count">(${tableData.totalCount})</span>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        </div>
-        
-        <div class="table-actions">
-            <button id="export-lookup-table" class="btn btn-outline-primary">Export Table</button>
-            <button id="toggle-heatmap" class="btn btn-outline-primary">View as Heatmap</button>
-        </div>
+        tableHtml += `
+                    </tbody>
+                </table>
+            </div>
+            <div class="text-muted mt-2">
+                <small>Cells are colored by win rate percentage. Hover over cells to see details.</small>
+            </div>
         `;
         
-        tableContainer.innerHTML = html;
+        container.innerHTML = tableHtml;
+    }
+    
+    /**
+     * Renders a multi-dimensional lookup table
+     * @param {HTMLElement} container - Container for the table
+     * @param {Object} data - Table data
+     * @private
+     */
+    function _renderMultiDimensionalTable(container, data) {
+        // In a full implementation, this would handle 3+ dimensions
+        // For simplicity, we'll show a message that this is complex and offer a different view
         
-        // Re-attach event listeners
-        document.getElementById('export-lookup-table').addEventListener('click', function() {
-            exportLookupTable();
-        });
+        container.innerHTML = `
+            <div class="alert alert-info">
+                <h5>Multi-dimensional View</h5>
+                <p>You've selected ${selectedDimensions.length} dimensions. For better visualization, we recommend:</p>
+                <ul>
+                    <li>Using the 'interactive filters' below to isolate specific dimension combinations</li>
+                    <li>Or, select fewer dimensions for a simpler table view</li>
+                </ul>
+            </div>
+            
+            <div class="multi-dim-controls">
+                <h6>Interactive Filters</h6>
+                ${selectedDimensions.map((dim, index) => `
+                    <div class="form-group">
+                        <label for="filter-dim-${index}">${dim.name}</label>
+                        <select id="filter-dim-${index}" class="form-control multi-dim-filter" data-dimension-id="${dim.id}">
+                            <option value="all">All values</option>
+                            ${data.dimensionValues[dim.id].map(value => `
+                                <option value="${value}">${value}</option>
+                            `).join('')}
+                        </select>
+                    </div>
+                `).join('')}
+                <button id="apply-multi-filters" class="btn btn-sm btn-primary">Apply Filters</button>
+            </div>
+            
+            <div class="filtered-results mt-4">
+                <div class="alert alert-secondary">
+                    <p>Select filters above and click 'Apply Filters' to see win rates for specific combinations.</p>
+                </div>
+            </div>
+        `;
         
-        document.getElementById('toggle-heatmap').addEventListener('click', function() {
-            toggleHeatmap();
+        // Set up event listener for the multi-dimensional filter
+        const applyButton = container.querySelector('#apply-multi-filters');
+        applyButton.addEventListener('click', () => {
+            _applyMultiDimensionalFilters(container, data);
         });
     }
     
     /**
-     * Generate data for lookup table
-     * @returns {Object} Table data
+     * Applies the heat map coloring to win rate cells
+     * @private
      */
-    function generateLookupTableData() {
-        // This is a simplified implementation
-        // In a real app, this would use the actual data from lookupData
+    function _applyHeatMapColoring() {
+        const cells = containerElement.querySelectorAll('.win-rate-cell');
         
-        // Check if we have necessary dimensions
-        if (!selectedPrimaryDimension || !lookupData.dimensions) {
-            return null;
-        }
-        
-        // Find primary dimension
-        const primaryDim = lookupData.dimensions.find(d => d.id === selectedPrimaryDimension);
-        if (!primaryDim || !primaryDim.values) {
-            return null;
-        }
-        
-        // Find secondary dimension (if selected)
-        let secondaryDim = null;
-        if (selectedSecondaryDimension) {
-            secondaryDim = lookupData.dimensions.find(d => d.id === selectedSecondaryDimension);
-        }
-        
-        // Generate columns based on secondary dimension or default
-        const columns = secondaryDim 
-            ? secondaryDim.values.map(val => ({ id: val, label: val }))
-            : [{ id: 'overall', label: 'Overall' }];
-        
-        // Generate rows based on primary dimension
-        const rows = primaryDim.values.map(primaryVal => {
-            // Generate cells for each column
-            const cells = columns.map(column => {
-                // In a real app, this would look up actual win rates from the data
-                // For now, generate random demo data
-                const winRate = Math.random();
-                const count = Math.floor(Math.random() * 100) + 5;
+        cells.forEach(cell => {
+            const value = parseFloat(cell.dataset.value);
+            if (!isNaN(value)) {
+                // Generate color from red (0%) to green (100%)
+                const red = Math.floor(255 * (1 - value));
+                const green = Math.floor(255 * value);
+                const blue = 0;
                 
-                return {
-                    primaryValue: primaryVal,
-                    secondaryValue: column.id,
-                    winRate,
-                    count
-                };
-            });
-            
-            // Calculate row totals
-            const totalCount = cells.reduce((sum, cell) => sum + cell.count, 0);
-            const totalWins = cells.reduce((sum, cell) => sum + (cell.winRate * cell.count), 0);
-            const totalWinRate = totalCount > 0 ? totalWins / totalCount : 0;
-            
-            return {
-                id: primaryVal,
-                label: primaryVal,
-                cells,
-                totalWinRate,
-                totalCount
-            };
+                // Apply more subtle coloring
+                const alpha = 0.2 + (value * 0.6); // Range from 0.2 to 0.8 for better visibility
+                cell.style.backgroundColor = `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+                
+                // Add dark text for light backgrounds and light text for dark backgrounds
+                cell.style.color = value > 0.5 ? '#000' : '#fff';
+            }
         });
-        
-        // Calculate column totals
-        const columnTotals = columns.map((column, colIndex) => {
-            const colCells = rows.map(row => row.cells[colIndex]);
-            const count = colCells.reduce((sum, cell) => sum + cell.count, 0);
-            const wins = colCells.reduce((sum, cell) => sum + (cell.winRate * cell.count), 0);
-            const winRate = count > 0 ? wins / count : 0;
-            
-            return {
-                id: column.id,
-                winRate,
-                count
-            };
-        });
-        
-        // Calculate overall totals
-        const totalCount = columnTotals.reduce((sum, col) => sum + col.count, 0);
-        const totalWins = columnTotals.reduce((sum, col) => sum + (col.winRate * col.count), 0);
-        const averageWinRate = totalCount > 0 ? totalWins / totalCount : 0;
-        
-        return {
-            rows,
-            columns,
-            columnTotals,
-            totalCount,
-            averageWinRate
-        };
     }
     
     /**
-     * Toggle between table and heatmap view
+     * Shows a loading indicator while generating the table
+     * @private
      */
-    function toggleHeatmap() {
-        const tableContainer = document.getElementById('lookup-table-container');
-        const heatmapContainer = document.getElementById('lookup-heatmap-container');
+    function _showLoadingIndicator() {
+        // Remove any existing table
+        const existingTable = containerElement.querySelector('.lookup-table-container');
+        if (existingTable) {
+            existingTable.remove();
+        }
         
-        if (heatmapContainer.style.display === 'none' || !heatmapContainer.style.display) {
-            // Show heatmap
-            tableContainer.style.display = 'none';
-            heatmapContainer.style.display = 'block';
-            
-            // Create heatmap if it doesn't exist
-            if (!heatmapChart) {
-                createHeatmap();
-            }
-            
-            document.getElementById('toggle-heatmap').textContent = 'View as Table';
+        // Create loading indicator
+        const loadingContainer = document.createElement('div');
+        loadingContainer.className = 'lookup-table-container mt-4';
+        loadingContainer.innerHTML = `
+            <div class="text-center p-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="mt-2">Generating lookup table...</p>
+                <p class="text-muted"><small>This may take a moment for complex tables</small></p>
+            </div>
+        `;
+        
+        containerElement.appendChild(loadingContainer);
+    }
+    
+    /**
+     * Shows an error message
+     * @param {string} message - Error message to display
+     * @private
+     */
+    function _showErrorMessage(message) {
+        // Remove any existing table or loading indicator
+        const existingTable = containerElement.querySelector('.lookup-table-container');
+        if (existingTable) {
+            existingTable.remove();
+        }
+        
+        // Create error message
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'lookup-table-container mt-4';
+        errorContainer.innerHTML = `
+            <div class="alert alert-danger">
+                <p>${message}</p>
+            </div>
+        `;
+        
+        containerElement.appendChild(errorContainer);
+    }
+    
+    /**
+     * Gets a confidence level label based on the confidence value
+     * @param {number} confidence - Confidence value (0-1)
+     * @returns {string} - HTML for the confidence label
+     * @private
+     */
+    function _getConfidenceLabel(confidence) {
+        if (confidence >= 0.9) {
+            return '<span class="badge badge-success">High</span>';
+        } else if (confidence >= 0.7) {
+            return '<span class="badge badge-warning">Medium</span>';
         } else {
-            // Show table
-            tableContainer.style.display = 'block';
-            heatmapContainer.style.display = 'none';
-            document.getElementById('toggle-heatmap').textContent = 'View as Heatmap';
+            return '<span class="badge badge-danger">Low</span>';
         }
     }
     
     /**
-     * Create heatmap visualization
+     * Applies filters to the multi-dimensional table view
+     * @param {HTMLElement} container - Table container element
+     * @param {Object} data - Table data
+     * @private
      */
-    function createHeatmap() {
-        const ctx = document.getElementById('heatmap-chart').getContext('2d');
-        
-        // Get table data
-        const tableData = generateLookupTableData();
-        
-        if (!tableData) {
-            return;
-        }
-        
-        // Prepare data for heatmap
-        const labels = tableData.rows.map(row => row.label);
-        const datasets = tableData.columns.map((column, colIndex) => {
-            return {
-                label: column.label,
-                data: tableData.rows.map(row => row.cells[colIndex].winRate * 100),
-                backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                borderColor: 'rgba(54, 162, 235, 1)',
-                borderWidth: 1,
-                hoverBackgroundColor: 'rgba(54, 162, 235, 0.4)',
-                hoverBorderColor: 'rgba(54, 162, 235, 1)'
-            };
-        });
-        
-        heatmapChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        stacked: true,
-                        title: {
-                            display: true,
-                            text: formatDimensionName(lookupData.dimensions.find(d => d.id === selectedPrimaryDimension).name)
-                        }
-                    },
-                    y: {
-                        stacked: false,
-                        title: {
-                            display: true,
-                            text: 'Win Rate (%)'
-                        },
-                        min: 0,
-                        max: 100
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const rowIndex = context.dataIndex;
-                                const colIndex = context.datasetIndex;
-                                const cell = tableData.rows[rowIndex].cells[colIndex];
-                                return [
-                                    `Win Rate: ${Utils.formatPercentage(cell.winRate)}`,
-                                    `Count: ${cell.count}`
-                                ];
-                            }
-                        }
-                    },
-                    legend: {
-                        position: 'bottom'
-                    }
-                }
+    function _applyMultiDimensionalFilters(container, data) {
+        // Get selected filter values
+        const filters = {};
+        container.querySelectorAll('.multi-dim-filter').forEach(filter => {
+            const dimensionId = filter.dataset.dimensionId;
+            const value = filter.value;
+            
+            if (value !== 'all') {
+                filters[dimensionId] = value;
             }
         });
-    }
-    
-    /**
-     * Export lookup table as CSV
-     */
-    function exportLookupTable() {
-        // Get table data
-        const tableData = generateLookupTableData();
         
-        if (!tableData) {
-            showError('No data available to export.');
-            return;
-        }
-        
-        // Generate CSV content
-        let csv = 'Primary Dimension,Secondary Dimension,Win Rate,Count\n';
-        
-        tableData.rows.forEach(row => {
-            row.cells.forEach((cell, colIndex) => {
-                csv += `${row.label},${tableData.columns[colIndex].label},${cell.winRate},${cell.count}\n`;
+        // Find matching records based on filters
+        const filteredRecords = data.records.filter(record => {
+            return Object.keys(filters).every(dimId => {
+                return record.dimensions[dimId] === filters[dimId];
             });
         });
         
-        // Create download link
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        // Render the filtered results
+        const resultsContainer = container.querySelector('.filtered-results');
+        
+        if (filteredRecords.length === 0) {
+            resultsContainer.innerHTML = `
+                <div class="alert alert-warning">
+                    <p>No opportunities match the selected filter criteria.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Calculate aggregate win rate for the filtered records
+        const wonCount = filteredRecords.filter(record => record.won).length;
+        const winRate = wonCount / filteredRecords.length;
+        
+        resultsContainer.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h6>Filtered Results</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h3 class="mb-0">${(winRate * 100).toFixed(1)}%</h3>
+                            <p class="text-muted">Win Rate</p>
+                        </div>
+                        <div class="col-md-6">
+                            <h3 class="mb-0">${filteredRecords.length}</h3>
+                            <p class="text-muted">Opportunities</p>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Applied Filters:</h6>
+                    <ul>
+                        ${Object.keys(filters).map(dimId => {
+                            const dimension = selectedDimensions.find(d => d.id === dimId);
+                            return `<li>${dimension.name}: ${filters[dimId]}</li>`;
+                        }).join('')}
+                    </ul>
+                </div>
+            </div>
+        `;
+    }
+    
+    /**
+     * Exports the current table as a CSV file
+     * @private
+     */
+    function _exportTableAsCSV() {
+        if (!tableData || !tableData.rows) {
+            alert('No data available for export.');
+            return;
+        }
+        
+        let csvContent = '';
+        
+        // Handle export based on number of dimensions
+        if (selectedDimensions.length === 1) {
+            // Header row
+            csvContent += `${selectedDimensions[0].name},Win Rate,Sample Size,Confidence\n`;
+            
+            // Data rows
+            tableData.rows.forEach(row => {
+                csvContent += `${row.value},${(row.winRate * 100).toFixed(1)}%,${row.sampleSize},${row.confidence}\n`;
+            });
+        } else if (selectedDimensions.length === 2) {
+            // Header row
+            csvContent += `${selectedDimensions[0].name} / ${selectedDimensions[1].name}`;
+            tableData.columnValues.forEach(colValue => {
+                csvContent += `,${colValue}`;
+            });
+            csvContent += '\n';
+            
+            // Data rows
+            tableData.rows.forEach(row => {
+                csvContent += row.value;
+                row.cells.forEach(cell => {
+                    csvContent += `,${cell.winRate ? (cell.winRate * 100).toFixed(1) + '%' : 'N/A'}`;
+                });
+                csvContent += '\n';
+            });
+        } else {
+            // Multi-dimensional export (simplified for this implementation)
+            csvContent += 'Multi-dimensional export not fully implemented in this version.\n';
+        }
+        
+        // Create and trigger download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.setAttribute('href', url);
-        link.setAttribute('download', `win-rate-lookup-${new Date().toISOString().slice(0, 10)}.csv`);
+        link.setAttribute('download', 'win_rate_lookup_table.csv');
         link.style.visibility = 'hidden';
-        
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     }
     
     /**
-     * Get CSS class for a cell based on win rate
-     * @param {number} winRate - Win rate value
-     * @returns {string} CSS class
+     * Exports the current table as an Excel file
+     * Note: In a real implementation, this would use a library like SheetJS
+     * @private
      */
-    function getCellClass(winRate) {
-        if (winRate >= 0.7) {
-            return 'high-rate';
-        } else if (winRate >= 0.5) {
-            return 'medium-rate';
-        } else if (winRate >= 0.3) {
-            return 'low-rate';
-        } else {
-            return 'very-low-rate';
-        }
-    }
-    
-    /**
-     * Format dimension name for display
-     * @param {string} dimension - Dimension name
-     * @returns {string} Formatted dimension name
-     */
-    function formatDimensionName(dimension) {
-        // Convert camelCase or snake_case to Title Case
-        return dimension
-            .replace(/([A-Z])/g, ' $1')
-            .replace(/_/g, ' ')
-            .replace(/^./, str => str.toUpperCase());
-    }
-    
-    /**
-     * Show or hide loading indicator
-     * @param {boolean} show - Whether to show loading indicator
-     */
-    function showLoading(show) {
-        const loadingElement = document.getElementById('lookup-loading');
-        if (loadingElement) {
-            loadingElement.style.display = show ? 'flex' : 'none';
-        }
-    }
-    
-    /**
-     * Show error message
-     * @param {string} message - Error message to show
-     */
-    function showError(message) {
-        const errorElement = document.getElementById('lookup-error');
-        if (errorElement) {
-            errorElement.textContent = message;
-            errorElement.style.display = 'block';
-            
-            // Hide after 5 seconds
-            setTimeout(() => {
-                errorElement.style.display = 'none';
-            }, 5000);
-        }
-    }
-    
-    /**
-     * Clear lookup table
-     */
-    function clearLookupTable() {
-        // Destroy heatmap chart if exists
-        if (heatmapChart) {
-            heatmapChart.destroy();
-            heatmapChart = null;
-        }
-        
-        // Clear containers
-        document.getElementById('lookup-table-container').innerHTML = '';
-        document.getElementById('lookup-filters').innerHTML = '';
-        
-        // Reset selectors
-        const primarySelector = document.getElementById('primary-dimension-selector');
-        const secondarySelector = document.getElementById('secondary-dimension-selector');
-        
-        if (primarySelector) primarySelector.innerHTML = '';
-        if (secondarySelector) secondarySelector.innerHTML = '';
-        
-        // Reset variables
-        selectedPrimaryDimension = '';
-        selectedSecondaryDimension = '';
-        selectedFilters = {};
-        filterValues = {};
+    function _exportTableAsExcel() {
+        alert('Excel export feature will be implemented in a future update. Please use CSV export for now.');
     }
     
     // Public API
     return {
-        initialize,
-        loadLookupTableData
+        init: init
     };
 })();
 
-// Export for use in other modules
-window.Lookup = Lookup;
+// Export the module
+export default LookupTable;
